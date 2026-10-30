@@ -28,6 +28,7 @@ To wire the clients again later: `aim install-clients` (idempotent).
 | Command | What it does |
 |---|---|
 | `aim start` / `aim stop` | Watcher + API in the background (logs and pids in `.aim/`) |
+| `aim autostart on\|off` | Windows: run `aim start` hidden at every logon (a `.vbs` in the Startup folder). macOS: use `scripts/launchd/` |
 | `aim graph` | Dev UI on http://localhost:5471 (starts the stack if needed) |
 | `aim galaxy` | 3D galaxy at http://127.0.0.1:5470/galaxy.html |
 | `aim status` | Counts, projects, ports |

@@ -3,7 +3,7 @@
 
     aim init | status | index [--force] | watch | api | mcp | start | stop
     aim graph | galaxy | search Q | recent [N] | write TYPE TITLE | sync | snapshot
-    aim brief | scout | clean | install-clients
+    aim brief | scout | clean | install-clients | autostart [on|off]
 
 `aim start` runs the watcher and API in the background (logs + pids in .aim/).
 """
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from server import code_index, config, db, memory  # noqa: E402
-from server.oscompat import detached_kwargs, pid_alive, terminate  # noqa: E402
+from server.oscompat import IS_WINDOWS, detached_kwargs, pid_is_python, terminate  # noqa: E402
 
 cfg = config.load()
 
@@ -109,7 +109,7 @@ def _start(name: str, module: str) -> None:
     if pf.exists():
         try:
             pid = int(pf.read_text().strip())
-            if pid_alive(pid):
+            if pid_is_python(pid):
                 print(f"• {name} already running (pid {pid})")
                 return
         except ValueError:
@@ -136,7 +136,8 @@ def cmd_stop(a) -> int:
             continue
         try:
             pid = int(pf.read_text().strip())
-            print(f"{'✓ stopped' if terminate(pid) else '• not running'} {name} (pid {pid})")
+            stopped = pid_is_python(pid) and terminate(pid)
+            print(f"{'✓ stopped' if stopped else '• not running'} {name} (pid {pid})")
         except ValueError:
             pass
         pf.unlink(missing_ok=True)
@@ -287,6 +288,37 @@ def cmd_clean(a) -> int:
     return cleanup.clean(cfg.root, apply=a.yes, do_slim=not a.no_slim, do_remove=not a.no_remove)
 
 
+STARTUP_VBS = "AIMemory autostart.vbs"
+
+
+def _startup_dir() -> Path:
+    return Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+
+
+def cmd_autostart(a) -> int:
+    """Run `aim start` at logon. Windows: a hidden .vbs in the Startup folder. macOS: launchd templates."""
+    if not IS_WINDOWS:
+        print("On macOS, use the LaunchAgent templates in scripts/launchd/ (see the comments inside).")
+        return 1
+    vbs = _startup_dir() / STARTUP_VBS
+    if a.action == "on":
+        vbs.parent.mkdir(parents=True, exist_ok=True)
+        cmd = f'""{sys.executable}"" ""{ROOT / "bin" / "aim"}"" start'
+        vbs.write_text(
+            "' AIMemory: start the watcher and API (aim start) hidden at logon. Remove with: aim autostart off\r\n"
+            f'CreateObject("WScript.Shell").Run "{cmd}", 0, False\r\n',
+            encoding="utf-16",  # Windows Script Host reads UTF-16 with BOM, so non-ASCII paths survive
+            newline="",
+        )
+        print(f"✓ autostart on: {vbs}")
+    elif a.action == "off":
+        vbs.unlink(missing_ok=True)
+        print("✓ autostart off")
+    else:
+        print(f"autostart {'on' if vbs.exists() else 'off'} ({vbs})")
+    return 0
+
+
 def cmd_install_clients(a) -> int:
     from scripts import install_clients
 
@@ -328,13 +360,16 @@ def main(argv=None) -> int:
     s = sub.add_parser("snapshot")
     s.add_argument("name", nargs="?")
     s.set_defaults(fn=cmd_snapshot)
+    s = sub.add_parser("autostart")
+    s.add_argument("action", nargs="?", choices=["on", "off", "status"], default="status")
+    s.set_defaults(fn=cmd_autostart)
     s = sub.add_parser("clean")
     s.add_argument("--yes", action="store_true")
     s.add_argument("--no-slim", action="store_true")
     s.add_argument("--no-remove", action="store_true")
     s.set_defaults(fn=cmd_clean)
     a = p.parse_args(argv)
-    if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    if sys.stdout and sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
         try:
             sys.stdout.reconfigure(encoding="utf-8")
         except Exception:

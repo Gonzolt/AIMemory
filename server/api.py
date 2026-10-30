@@ -170,10 +170,15 @@ async def memory_delete(request: Request):
     m = memory.get(mconn, mid)
     if not m:
         return _json({"error": "not_found"}, 404)
-    try:
-        Path(m["path"]).unlink()
-    except OSError:
-        pass
+    # On Windows the unlink fails while another process (the watcher) has the file open; retry briefly.
+    for attempt in range(10):
+        try:
+            Path(m["path"]).unlink(missing_ok=True)
+            break
+        except PermissionError:
+            if attempt == 9:
+                return _json({"error": "file is locked by another process; try again"}, 409)
+            await asyncio.sleep(0.1)
     mconn.execute("DELETE FROM memories_fts WHERE id=?", (mid,))
     mconn.execute("DELETE FROM memories WHERE id=?", (mid,))
     return _json({"ok": True, "id": mid})

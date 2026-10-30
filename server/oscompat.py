@@ -44,6 +44,37 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+def process_image(pid: int) -> str | None:
+    """Executable path of a running process, or None if gone/unknown."""
+    if not pid_alive(pid):
+        return None
+    if IS_WINDOWS:
+        import ctypes
+        from ctypes import wintypes
+
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        if not h:
+            return None
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(len(buf))
+            ok = ctypes.windll.kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size))
+            return buf.value if ok else None
+        finally:
+            ctypes.windll.kernel32.CloseHandle(h)
+    try:
+        return os.readlink(f"/proc/{pid}/exe")
+    except OSError:
+        r = subprocess.run(["ps", "-p", str(pid), "-o", "comm="], capture_output=True, text=True)
+        return r.stdout.strip() or None
+
+
+def pid_is_python(pid: int) -> bool:
+    """True only for a live Python process: pid files outlive reboots and pids get reused."""
+    image = process_image(pid)
+    return bool(image) and "python" in os.path.basename(image).lower()
+
+
 def terminate(pid: int) -> bool:
     """SIGTERM (TerminateProcess on Windows). False if the process was already gone."""
     if not pid_alive(pid):
