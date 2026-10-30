@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Start watcher + API at login. Copy to ~/Library/LaunchAgents/, replace <PYTHON>, <ROOT>, <HOME>,
+     then: mkdir -p ~/Library/Logs/boltramemory && launchctl load ~/Library/LaunchAgents/com.boltramemory.server.plist
+     Logs live outside ~/Documents: launchd may not open files there (exit 78). -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.boltramemory.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string><PYTHON></string>
+    <string><ROOT>/bin/aim</string>
+    <string>start</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string><HOME>/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key><string><HOME></string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>AbandonProcessGroup</key><true/>
+  <key>StandardOutPath</key><string><HOME>/Library/Logs/boltramemory/server.log</string>
+  <key>StandardErrorPath</key><string><HOME>/Library/Logs/boltramemory/server.log</string>
+</dict>
+</plist>

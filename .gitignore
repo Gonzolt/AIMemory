@@ -1,0 +1,31 @@
+# SQLite indexes — rebuildable from memory files on any machine.
+index/*.sqlite
+index/*.sqlite-*
+index/*.db
+index/*.db-*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Node / graph UI
+graph/node_modules/
+graph/dist/
+graph/.vite/
+graph/build/
+
+# Local logs and pid files
+*.log
+*.pid
+.aim/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Obsidian (vault = memories/); keep graph config, skip per-session layout
+memories/.obsidian/workspace*.json
+memories/.obsidian/cache

@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+"""aim — the AIMemory CLI.
+
+    aim init | status | index [--force] | watch | api | mcp | start | stop
+    aim graph | galaxy | search Q | recent [N] | write TYPE TITLE | sync | snapshot
+    aim brief | scout | clean | install-clients
+
+`aim start` runs the watcher and API in the background (logs + pids in .aim/).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+import webbrowser
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from server import code_index, config, db, memory  # noqa: E402
+from server.oscompat import detached_kwargs, pid_alive, terminate  # noqa: E402
+
+cfg = config.load()
+
+
+def _conns():
+    db.init_schema(cfg.memory_db, cfg.code_db)
+    return db.connect(cfg.memory_db), db.connect(cfg.code_db)
+
+
+def _env() -> dict:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    return env
+
+
+# --------------------------------------------------------------------------- commands
+
+def cmd_init(a) -> int:
+    mconn, cconn = _conns()
+    n = memory.reindex_all(cfg, mconn)
+    print(f"✓ Memory index built: {n} memories")
+    for name, r in code_index.index_all(cconn, cfg).items():
+        missing = "" if r["exists"] else " (missing)"
+        print(f"✓ Code index — {name}{missing}: {r['indexed'] + r['skipped']} files in {r['seconds']}s")
+    print("\nNext: `aim start` (watcher + API), then `aim graph` for the UI, or `aim install-clients` to wire MCP.")
+    return 0
+
+
+def cmd_status(a) -> int:
+    mconn, cconn = _conns()
+    n = mconn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+    e = mconn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+    print(f"Root:      {cfg.root}")
+    print(f"Memories:  {n}   Edges: {e}")
+    for r in mconn.execute("SELECT type, COUNT(*) AS n FROM memories GROUP BY type ORDER BY n DESC"):
+        print(f"  {r['type']:<13} {r['n']}")
+    f = cconn.execute("SELECT COUNT(*) FROM code_files").fetchone()[0]
+    c = cconn.execute("SELECT COUNT(*) FROM code_chunks").fetchone()[0]
+    print(f"Code:      {f} files, {c} chunks")
+    for p in cfg.projects:
+        print(f"  {p.name:<13} {p.path}{'' if p.path.exists() else '  (missing)'}")
+    print(f"API:       http://{cfg.api_host}:{cfg.api_port}")
+    print(f"Graph:     http://localhost:{cfg.graph_dev_port}")
+    if cfg.sync_remote:
+        print(f"Sync:      {cfg.sync_remote}")
+    return 0
+
+
+def cmd_index(a) -> int:
+    mconn, cconn = _conns()
+    n = memory.reindex_all(cfg, mconn)
+    print(f"✓ {n} memories")
+    for name, r in code_index.index_all(cconn, cfg, force=a.force).items():
+        print(f"✓ {name}: {r['indexed']} indexed, {r['skipped']} unchanged ({r['seconds']}s){'' if r['exists'] else ' (missing)'}")
+    return 0
+
+
+def _run_module(mod: str) -> int:
+    return subprocess.call([sys.executable, "-m", mod], cwd=ROOT, env=_env())
+
+
+def cmd_watch(a) -> int:
+    return _run_module("server.watcher")
+
+
+def cmd_api(a) -> int:
+    return _run_module("server.api")
+
+
+def cmd_mcp(a) -> int:
+    return _run_module("server.mcp_server")
+
+
+def _pidfile(name: str) -> Path:
+    return cfg.aim_dir / f"{name}.pid"
+
+
+def _start(name: str, module: str) -> None:
+    cfg.aim_dir.mkdir(parents=True, exist_ok=True)
+    pf = _pidfile(name)
+    if pf.exists():
+        try:
+            pid = int(pf.read_text().strip())
+            if pid_alive(pid):
+                print(f"• {name} already running (pid {pid})")
+                return
+        except ValueError:
+            pass
+    log = open(cfg.aim_dir / f"{name}.log", "a", encoding="utf-8")
+    p = subprocess.Popen(
+        [sys.executable, "-m", module], cwd=ROOT, env=_env(), stdin=subprocess.DEVNULL,
+        stdout=log, stderr=log, **detached_kwargs(),
+    )
+    pf.write_text(str(p.pid))
+    print(f"✓ {name} started (pid {p.pid}, log .aim/{name}.log)")
+
+
+def cmd_start(a) -> int:
+    _start("watcher", "server.watcher")
+    _start("api", "server.api")
+    return 0
+
+
+def cmd_stop(a) -> int:
+    for name in ("watcher", "api", "vite"):
+        pf = _pidfile(name)
+        if not pf.exists():
+            continue
+        try:
+            pid = int(pf.read_text().strip())
+            print(f"{'✓ stopped' if terminate(pid) else '• not running'} {name} (pid {pid})")
+        except ValueError:
+            pass
+        pf.unlink(missing_ok=True)
+    return 0
+
+
+def _pm() -> str | None:
+    for pm in ("pnpm", "bun", "npm"):
+        if shutil.which(pm):
+            return pm
+    return None
+
+
+def cmd_graph(a) -> int:
+    g = ROOT / "graph"
+    pm = _pm()
+    if not pm:
+        print("✗ need pnpm, bun or npm on PATH")
+        return 1
+    if not (g / "node_modules").exists():
+        subprocess.call([shutil.which(pm), "install"], cwd=g)
+    cmd_start(a)
+    url = f"http://localhost:{cfg.graph_dev_port}"
+    webbrowser.open(url)
+    return subprocess.call([shutil.which(pm), "run", "dev"], cwd=g)
+
+
+def _api_up() -> bool:
+    try:
+        with urllib.request.urlopen(f"http://{cfg.api_host}:{cfg.api_port}/api/health", timeout=2) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def cmd_galaxy(a) -> int:
+    if not _api_up():
+        cmd_start(a)
+        time.sleep(2)
+    if not (ROOT / "graph" / "dist" / "galaxy.html").exists():
+        print("✗ Galaxy not built. Run: pnpm --prefix graph exec vite build   (or npm --prefix graph run build)")
+        return 1
+    webbrowser.open(f"http://{cfg.api_host}:{cfg.api_port}/galaxy.html")
+    return 0
+
+
+def cmd_search(a) -> int:
+    mconn, _ = _conns()
+    hits = memory.search(mconn, a.query, type=a.type, project=a.project, limit=a.limit)
+    if not hits:
+        print("(no matches)")
+        return 0
+    for h in hits:
+        first = next((l.strip() for l in h["body"].splitlines() if l.strip()), "")
+        print(f"{h['type']:<12} {h['id']}  {h['title']}")
+        if first:
+            print(f"             {first[:120]}")
+    return 0
+
+
+def cmd_recent(a) -> int:
+    mconn, _ = _conns()
+    for m in memory.recent(mconn, a.n):
+        print(f"{m['updated'][:10]} {m['type']:<12} {m['id']}  {m['title']}")
+    return 0
+
+
+def cmd_write(a) -> int:
+    mconn, _ = _conns()
+    body = sys.stdin.read() if a.body == "-" else (a.body or "")
+    mem = memory.write_memory(
+        cfg, type=a.type, title=a.title, body=body, agents=["cli"],
+        projects=[p.strip() for p in a.projects.split(",") if p.strip()] if a.projects else None,
+        tags=[t.strip() for t in a.tags.split(",") if t.strip()] if a.tags else None,
+    )
+    memory.upsert(mconn, mem)
+    print(f"✓ wrote {mem.id} → {mem.path}")
+    return 0
+
+
+def _git(*args, check=False) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=check)
+
+
+def _has_remote() -> bool:
+    return bool(cfg.sync_remote) or bool(_git("remote").stdout.strip())
+
+
+def cmd_sync(a) -> int:
+    if not (ROOT / ".git").exists():
+        print("✗ not a git repo; run `git init` in", ROOT)
+        return 1
+    _git("add", "-A")
+    if _git("diff", "--cached", "--quiet").returncode == 1:
+        r = _git("commit", "-m", a.m or "sync")
+        print(r.stdout.strip() or r.stderr.strip())
+    else:
+        print("• nothing to commit")
+    if _has_remote():
+        for args in (("pull", "--rebase", "--autostash"), ("push",)):
+            r = _git(*args)
+            out = (r.stdout + r.stderr).strip()
+            print(f"git {args[0]}: {'ok' if r.returncode == 0 else 'failed'}{(' — ' + out[-300:]) if out and r.returncode else ''}")
+    else:
+        print("✓ committed locally (no remote configured)")
+    return 0
+
+
+def cmd_snapshot(a) -> int:
+    if not (ROOT / ".git").exists():
+        print("✗ not a git repo")
+        return 1
+    tag = a.name or "snapshot-" + datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M")
+    _git("add", "-A")
+    if _git("diff", "--cached", "--quiet").returncode == 1:
+        _git("commit", "-m", f"snapshot {tag}")
+    r = _git("tag", "-a", tag, "-m", f"snapshot {tag}")
+    if r.returncode:
+        print(r.stderr.strip())
+        return 1
+    print(f"✓ tagged {tag}")
+    if _has_remote():
+        r = _git("push", "--tags")
+        print("git push --tags:", "ok" if r.returncode == 0 else r.stderr.strip()[-300:])
+    return 0
+
+
+def cmd_brief(a) -> int:
+    from server import brief
+
+    path = brief.generate(cfg)
+    print(path)
+    print(Path(path).read_text(encoding="utf-8"))
+    return 0
+
+
+def cmd_scout(a) -> int:
+    from server import cleanup
+
+    report = cleanup.scout(cfg.root)
+    print(cleanup.summary(report))
+    return 0
+
+
+def cmd_clean(a) -> int:
+    from server import cleanup
+
+    return cleanup.clean(cfg.root, apply=a.yes, do_slim=not a.no_slim, do_remove=not a.no_remove)
+
+
+def cmd_install_clients(a) -> int:
+    from scripts import install_clients
+
+    install_clients.run()
+    return 0
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(prog="aim", description="AIMemory — shared local memory for AI tools")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("init").set_defaults(fn=cmd_init)
+    sub.add_parser("status").set_defaults(fn=cmd_status)
+    s = sub.add_parser("index")
+    s.add_argument("--force", action="store_true")
+    s.set_defaults(fn=cmd_index)
+    for name, fn in (("watch", cmd_watch), ("api", cmd_api), ("mcp", cmd_mcp), ("start", cmd_start),
+                     ("stop", cmd_stop), ("graph", cmd_graph), ("galaxy", cmd_galaxy), ("brief", cmd_brief),
+                     ("scout", cmd_scout), ("install-clients", cmd_install_clients)):
+        sub.add_parser(name).set_defaults(fn=fn)
+    s = sub.add_parser("search")
+    s.add_argument("query")
+    s.add_argument("--type")
+    s.add_argument("--project")
+    s.add_argument("--limit", type=int, default=20)
+    s.set_defaults(fn=cmd_search)
+    s = sub.add_parser("recent")
+    s.add_argument("n", nargs="?", type=int, default=10)
+    s.set_defaults(fn=cmd_recent)
+    s = sub.add_parser("write")
+    s.add_argument("type")
+    s.add_argument("title")
+    s.add_argument("--body", default="")
+    s.add_argument("--projects")
+    s.add_argument("--tags")
+    s.set_defaults(fn=cmd_write)
+    s = sub.add_parser("sync")
+    s.add_argument("-m")
+    s.set_defaults(fn=cmd_sync)
+    s = sub.add_parser("snapshot")
+    s.add_argument("name", nargs="?")
+    s.set_defaults(fn=cmd_snapshot)
+    s = sub.add_parser("clean")
+    s.add_argument("--yes", action="store_true")
+    s.add_argument("--no-slim", action="store_true")
+    s.add_argument("--no-remove", action="store_true")
+    s.set_defaults(fn=cmd_clean)
+    a = p.parse_args(argv)
+    if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    return a.fn(a) or 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,28 @@
+# Glob patterns of files/dirs to skip when indexing code.
+# Same syntax as .gitignore.
+node_modules/
+.git/
+.next/
+.nuxt/
+dist/
+build/
+target/
+.venv/
+venv/
+__pycache__/
+.turbo/
+.cache/
+.idea/
+.vscode/
+.DS_Store
+*.log
+*.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb
+Cargo.lock
+poetry.lock
+*.min.js
+*.min.css
+*.map

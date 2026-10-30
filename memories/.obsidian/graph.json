@@ -1,0 +1,31 @@
+{
+  "collapse-filter": false,
+  "search": "",
+  "showTags": false,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    { "query": "path:_projects", "color": { "a": 1, "rgb": 16777215 } },
+    { "query": "path:user/", "color": { "a": 1, "rgb": 16777215 } },
+    { "query": "path:feedback/", "color": { "a": 1, "rgb": 15723263 } },
+    { "query": "path:decision/", "color": { "a": 1, "rgb": 10980346 } },
+    { "query": "path:task/", "color": { "a": 1, "rgb": 13352191 } },
+    { "query": "path:reference/", "color": { "a": 1, "rgb": 7310591 } },
+    { "query": "path:project/", "color": { "a": 1, "rgb": 12831208 } },
+    { "query": "path:conversation/", "color": { "a": 1, "rgb": 7107480 } }
+  ],
+  "collapse-display": false,
+  "showArrow": false,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": true,
+  "centerStrength": 0.5,
+  "repelStrength": 10,
+  "linkStrength": 1,
+  "linkDistance": 250,
+  "scale": 1,
+  "close": false
+}

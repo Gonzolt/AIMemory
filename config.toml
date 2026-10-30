@@ -1,0 +1,62 @@
+# AIMemory configuration
+[paths]
+root = "~/Documents/AIMemory"
+memories = "~/Documents/AIMemory/memories"
+index = "~/Documents/AIMemory/index"
+
+# One block per code project to index. Add your own; a missing path is
+# reported as "(missing)" and skipped.
+[[projects]]
+name = "aimemory"
+path = "~/Documents/AIMemory/server"
+
+# [[projects]]
+# name = "<PROJECT_A>"
+# path = "~/Documents/<PROJECT_A>"
+
+[indexer]
+skip_dirs = [
+  "node_modules", ".git", ".next", ".nuxt", "dist", "build",
+  "target", ".venv", "venv", "__pycache__", ".turbo", ".cache",
+  ".idea", ".vscode", ".DS_Store", "coverage", "out",
+]
+text_extensions = [
+  "ts", "tsx", "js", "jsx", "mjs", "cjs",
+  "py", "rs", "go", "rb", "java", "kt", "swift", "c", "h", "cpp", "hpp",
+  "css", "scss", "html", "vue", "svelte", "astro",
+  "md", "mdx", "txt",
+  "toml", "yaml", "yml", "json",
+  "sh", "zsh", "bash",
+  "sql", "graphql", "prisma",
+]
+chunk_lines = 60
+chunk_overlap = 10
+max_file_bytes = 524288  # 512 KB
+
+[server]
+api_host = "127.0.0.1"
+api_port = 5470
+ws_enabled = true          # parsed, not otherwise used
+
+[graph]
+dev_port = 5471
+
+[sync]
+remote = ""                # private remote URL; empty = commit locally only
+branch = "main"            # parsed; git uses its own upstream
+auto_commit = false        # parsed, not used
+
+[security]                 # only matters if the API is exposed through a tunnel
+allowed_emails = []        # e.g. ["you@example.com"]; empty = gate disabled; loopback always allowed
+rate_limit_per_minute = 8  # code default 0 = off
+
+[webhooks]
+on_memory_changed = ""     # POST target for memory_changed events; empty = off
+
+[dispatch]
+dangerously_skip_permissions = true   # headless claude/codex runs get --dangerously-skip-permissions / --full-auto
+
+# Optional, read only by brief.py (git log of these repos goes into the brief)
+# and cleanup.py (git worktrees of these repos are scouted):
+# [brief]
+# repos = ["~/Documents/<MAIN_REPO>"]

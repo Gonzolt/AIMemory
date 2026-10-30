@@ -1,0 +1,4 @@
+# Keep LF everywhere: bin/aim and install.sh run on macOS/Linux, memories sync across machines.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

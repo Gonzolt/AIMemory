@@ -1,0 +1,31 @@
+/* AIMemory graph styling: matches the galaxy at :5470/galaxy.html */
+.graph-view.color-fill {
+  color: #c3c9e8;
+}
+.graph-view.color-fill-focused {
+  color: #ffffff;
+}
+.graph-view.color-line {
+  color: rgba(118, 124, 196, 0.38);
+}
+.graph-view.color-line-highlight {
+  color: #a78bfa;
+}
+.workspace-leaf-content[data-type="graph"] .view-content,
+.workspace-leaf-content[data-type="localgraph"] .view-content {
+  background-color: #0a0b16;
+}
+
+/* Galaxy.md: full-bleed iframe */
+.galaxy .markdown-preview-sizer,
+.galaxy .cm-sizer {
+  max-width: none !important;
+  padding: 0 !important;
+}
+.galaxy iframe {
+  width: 100%;
+  height: calc(100vh - 120px);
+  border: 0;
+  border-radius: 8px;
+  background: #0a0b16;
+}
